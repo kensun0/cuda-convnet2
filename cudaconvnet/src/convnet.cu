@@ -667,6 +667,8 @@ void ConvNetThread::initLayer(PyObject* paramsDict, int replicaID) {
         _nameLayerMap[name] = new DropoutLayer(this, paramsDict, replicaID);
     } else if (type == "dropout2") {
         _nameLayerMap[name] = new Dropout2Layer(this, paramsDict, replicaID);
+    } else if (type == "normlize") {
+        _nameLayerMap[name] = new NormalizeLayer(this, paramsDict, replicaID);
     } else if (strncmp(type.c_str(), "cost.", 5) == 0) {
         CostLayer *c = &CostLayer::make(this, paramsDict, type, replicaID);
         _nameLayerMap[name] = c;
