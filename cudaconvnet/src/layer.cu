@@ -2055,6 +2055,10 @@ CostLayer& CostLayer::make(ConvNetThread* convNetThread, PyObject* paramsDict, s
         return *new LogregCostLayer(convNetThread, paramsDict, replicaID);
     } else if (type == "cost.sum2") {
         return *new SumOfSquaresCostLayer(convNetThread, paramsDict, replicaID);
+    } else if (type == "cost.hardtriplet") {
+	return *new HardTripletLossLayer(convNetThread, paramsDict, replicaID);
+    } else if (type == "cost.contrastive") {
+	return *new ContrastiveLossLayer(convNetThread, paramsDict, replicaID);
     }
     throw std::string("Unknown cost layer type ") + type;
 }
