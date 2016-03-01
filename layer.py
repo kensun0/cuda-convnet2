@@ -1477,7 +1477,51 @@ class SumOfSquaresCostParser(CostParser):
         dic = CostParser.parse(self, name, mcp, prev_layers, model)
         print "Initialized sum-of-squares cost '%s' on GPUs %s" % (name, dic['gpus'])
         return dic
-    
+////////////////////////////////////////////////////////////////////////////////////////////////////
+/* sun added */
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class NormalizeLayerParser(LayerWithInputParser):
+    def __init__(self):
+        LayerWithInputParser.__init__(self, num_inputs=1)
+        
+    def parse(self, name, mcp, prev_layers, model):
+        dic = LayerWithInputParser.parse(self, name, mcp, prev_layers, model)
+        dic['outputs'] = dic['numInputs'][0]
+        print "Initialized Normalize layer, producing %d output, on GPUs %s" % (dic['outputs'], dic['gpus'])
+        return dic  
+class HardTripletCostParser(CostParser):
+    def __init__(self):
+        CostParser.__init__(self, num_inputs=2)
+        
+    def parse(self, name, mcp, prev_layers, model):
+        dic = CostParser.parse(self, name, mcp, prev_layers, model)
+        print "Initialized Hard Triplet cost %s layer, on GPUs %s" % (name, dic['gpus'])
+        return dic
+    		
+    def add_params(self, mcp):
+        LayerWithInputParser.add_params(self, mcp)
+        dic, name = self.dic, self.dic['name']
+        dic['stype'] = mcp.safe_get(name, 'stype')
+        dic['ltype'] = mcp.safe_get(name, 'ltype')
+        dic['coeff'] = mcp.safe_get_float(name, 'coeff')
+        dic['margin'] = mcp.safe_get_float(name, 'margin')
+        dic['startID'] = mcp.safe_get_int(name, 'startID')
+class ContrastiveCostParser(CostParser):
+    def __init__(self):
+        CostParser.__init__(self, num_inputs=2)
+        
+    def parse(self, name, mcp, prev_layers, model):
+        dic = CostParser.parse(self, name, mcp, prev_layers, model)
+        print "Initialized Contrastive loss %s layer, on GPUs %s" % (name, dic['gpus'])
+        return dic
+    		
+    def add_params(self, mcp):
+        LayerWithInputParser.add_params(self, mcp)
+        dic, name = self.dic, self.dic['name']
+        dic['stype'] = mcp.safe_get(name, 'stype')
+        dic['mtype'] = mcp.safe_get(name, 'mtype')
+        dic['coeff'] = mcp.safe_get_float(name, 'coeff')
+        dic['margin'] = mcp.safe_get_float(name, 'margin')
 # All the layer parsers
 layer_parsers = {'data' :           lambda : DataLayerParser(),
                  'fc':              lambda : FCLayerParser(),
@@ -1506,11 +1550,14 @@ layer_parsers = {'data' :           lambda : DataLayerParser(),
                  'pass':            lambda : PassThroughLayerParser(),
                  'dropout':         lambda : DropoutLayerParser(),
                  'dropout2':        lambda : Dropout2LayerParser(),
+                 'normlize':        lambda : NormalizeLayerParser(),
                  'cost.logreg':     lambda : LogregCostParser(),
                  'cost.crossent':   lambda : CrossEntCostParser(),
                  'cost.bce':        lambda : BinomialCrossEntCostParser(),
                  'cost.dce':        lambda : DetectionCrossEntCostParser(),
-                 'cost.sum2':       lambda : SumOfSquaresCostParser()}
+                 'cost.sum2':       lambda : SumOfSquaresCostParser(),
+                 'cost.hardtriplet':        lambda : HardTripletCostParser(),
+                 'cost.contrastive':        lambda : ContrastiveCostParser(),}
  
 # All the neuron parsers
 # This isn't a name --> parser mapping as the layer parsers above because neurons don't have fixed names.
