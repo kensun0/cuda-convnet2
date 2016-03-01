@@ -219,6 +219,34 @@ public:
     int getActivePassPeriod();
     int getNumGradProducersNext();
     virtual ConvNet& getConvNet();
+    void kankan(NVMatrix& v,const char* cp=NULL)
+    {
+	int rows=v.getNumRows();
+	int cols=v.getNumCols();
+	int trans=v.isTrans();
+	char name[512];
+	if (cp==NULL)
+	{
+		sprintf(name,"mat_%d_%d_%d",rows,cols,trans);
+	}
+	else
+	{
+		sprintf(name,"mat_%s_%d_%d_%d",cp,rows,cols,trans);
+	}
+
+	Matrix* tmp = new Matrix(v.getNumRows(), v.getNumCols());
+	v.copyToHost(*tmp);
+
+	FILE* testfile=fopen(name,"ab+");
+		
+	fwrite(&rows,sizeof(int),1,testfile);
+	fwrite(&cols,sizeof(int),1,testfile);
+	fwrite(&trans,sizeof(int),1,testfile);
+	fwrite(tmp->getData(),sizeof(float),rows*cols,testfile);
+
+	fclose(testfile);
+	delete tmp;
+    }
 };
 
 class TwoDLayerInterface {
