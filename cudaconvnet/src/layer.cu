@@ -2304,3 +2304,686 @@ void SumOfSquaresCostLayer::bpropActs(NVMatrix& v, int replicaIdx, int inpIdx, f
     _prev[replicaIdx][inpIdx]->getActsGrad().add(*_inputs[0], scaleTargets, -2 * _coeff);
 }
 
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+/* sun added */
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+/*
+ * =======================
+ * NormalizeLayer  
+ * =======================
+ */
+NormalizeLayer::NormalizeLayer(ConvNetThread* convNetThread, PyObject* paramsDict, int replicaID) : Layer(convNetThread, paramsDict,replicaID, true) {
+	norm = new NVMatrix();
+}
+
+void NormalizeLayer::fpropActs(int inpIdx, float scaleTargets, PASS_TYPE passType, int passIdx) {
+	if (inpIdx == 0) 
+	{
+		NVMatrix* square = new NVMatrix();
+		assert(_inputs[inpIdx]->isTrans()==true);
+		square->resize(*_inputs[inpIdx]);
+		//kankan(*_inputs[inpIdx],"f");
+		
+		_inputs[inpIdx]->apply(NVMatrixOps::Square(),*square);
+		//kankan(*square,"s");
+		assert(square->isTrans()==true);
+		square->sum(1,*norm);
+		norm->apply(NVMatrixOps::Sqrt());
+		norm->addScalar(FLT_EPSILON);
+		//kankan(*norm,"n");
+		assert(norm->getNumRows()==_inputs[inpIdx]->getNumRows() && norm->getNumCols()==1);
+		assert(norm->isTrans()==true);
+		_inputs[inpIdx]->applyBinaryV(NVMatrixBinaryOps::Divide(),*norm,getActs());
+		//kankan(getActs(),"o");
+		delete square;
+	}
+}
+//getActsGrad = v / norm - dot(v, input) / (norm)^2 * getActs
+void NormalizeLayer::bpropActs(NVMatrix& v,int replicaIdx, int inpIdx, float scaleTargets, PASS_TYPE passType) {
+	if (inpIdx == 0) 
+	{
+		NVMatrix* dot = new NVMatrix();
+		//kankan(v,"v1");
+		v.copy(*dot);
+		assert(dot->isTrans()==true);
+		assert(_inputs[inpIdx]->isTrans()==true);
+		
+		dot->applyBinary(NVMatrixBinaryOps::Multiply(),*_inputs[inpIdx]);
+		//kankan(*_inputs[inpIdx],"in");
+		//kankan(*dot,"dot");
+		NVMatrix* sumdot = new NVMatrix();
+		
+		dot->sum(1,*sumdot);
+		assert(sumdot->isTrans()==true);
+		//kankan(*norm,"n");
+		NVMatrix* tmp1 = new NVMatrix();
+		assert(norm->isTrans()==true);
+		v.applyBinaryV(NVMatrixBinaryOps::Divide(),*norm,*tmp1);
+
+		NVMatrix* tmp2 = new NVMatrix();
+		NVMatrix* tmp = new NVMatrix();
+		
+		assert(getActs().isTrans()==true);
+		getActs().applyBinaryV(NVMatrixBinaryOps::Multiply(),*sumdot,*tmp2);
+		assert(tmp2->isTrans()==true);
+		tmp2->applyBinaryV(NVMatrixBinaryOps::Divide(),*norm,*tmp);
+		assert(tmp->isTrans()==true);
+		tmp->applyBinaryV(NVMatrixBinaryOps::Divide(),*norm,*tmp2);
+		assert(tmp1->isTrans()==true);
+		tmp1->subtract(*tmp2);
+		if (scaleTargets==0)
+		{
+			tmp1->copy(_prev[replicaIdx][inpIdx]->getActsGrad());
+			assert(_prev[replicaIdx][inpIdx]->getActsGrad().isTrans()==true);
+		} 
+		else
+		{
+			_prev[replicaIdx][inpIdx]->getActsGrad().add(*tmp1);
+		}
+		//kankan(_prev[inpIdx]->getActsGrad(),"v2");
+		
+		delete dot;
+		delete sumdot;
+		delete tmp1;
+		delete tmp2;
+		delete tmp;
+	}
+}
+
+/*
+ * =======================
+ * HardTripletLossLayer  
+ * =======================
+ */
+HardTripletLossLayer::HardTripletLossLayer(ConvNetThread* convNetThread, PyObject* paramsDict, int replicaID) : CostLayer(convNetThread, paramsDict, replicaID, true) {
+	stype = pyDictGetString(paramsDict, "stype");
+	ltype = pyDictGetString(paramsDict, "ltype");
+	margin = pyDictGetFloat(paramsDict, "margin");
+	startID = pyDictGetInt(paramsDict, "startID");
+	tran = new NVMatrix();
+	dist = new NVMatrix();
+	diff = new NVMatrix();
+}
+
+void HardTripletLossLayer::fpropActs(int inpIdx, float scaleTargets, PASS_TYPE passType, int passIdx) {
+	
+	if (inpIdx == 1) 
+	{
+		assert(_inputs[1]->getNumRows()%2==0 && _inputs[0]->getNumCols()==1);
+		int row=_inputs[1]->getNumRows();
+		int col=_inputs[1]->getNumCols();
+		_inputs[1]->transpose(*tran);
+		_inputs[1]->rightMult(*tran,*dist);
+		if (ltype=="hinge")
+		{
+			dist->addScalar(-1);
+			dist->apply(NVMatrixOps::MultByScalar(-2));
+		}
+		else
+		{
+			dist->addScalar(-1);
+			dist->apply(NVMatrixOps::MultByScalar(-2));
+		}
+		dist->apply(NVMatrixOps::Abs());
+		
+		Matrix* cpu_dist = new Matrix(dist->getNumRows(),dist->getNumCols());
+		dist->copyToHost(*cpu_dist);
+		float* cpu_dist_p=cpu_dist->getData();
+		
+		Matrix* cpu_label = new Matrix(_inputs[0]->getNumRows(),_inputs[0]->getNumCols());
+		_inputs[0]->copyToHost(*cpu_label);
+		float* cpu_label_p=cpu_label->getData();
+
+		NVMatrix* a_tmp = new NVMatrix(1,col,true);
+		NVMatrix* p_tmp = new NVMatrix(1,col,true);
+		NVMatrix* n_tmp = new NVMatrix(1,col,true);
+		NVMatrix* apn_tmp = new NVMatrix(1,col,true);
+
+		diff->resize(*_inputs[1]);
+		diff->apply(NVMatrixOps::Zero());
+		assert(diff->isTrans()==true);
+		NVMatrix* diff_tmp = new NVMatrix(1,col,true);
+		
+		float loss=0;
+		float meanT=0;
+		float meanF=0;
+		int used=0;
+		int sNum=0;
+		for (int i=0;i<row;i+=2)
+		{
+			vector<pair<float,int>> negative_tmp;
+			vector<pair<float,int>> negative_semi_tmp;
+			int label1 = cpu_label_p[i];
+			if(label1>=startID)
+				sNum++;
+			for (int j=0;j<row;++j)
+			{
+				int label2 = cpu_label_p[j];
+				if (label1==label2)
+					continue;
+				if (label1>=startID && label2>=startID)
+					continue;
+				float same_dist= cpu_dist_p[i*row+i+1];
+				float diff_dist= cpu_dist_p[i*row+j];
+				float loss_tmp = max(0.0f, same_dist + margin - diff_dist);
+				if (loss_tmp>0)
+				{
+					negative_tmp.push_back(make_pair(diff_dist,j));
+					if ( diff_dist > same_dist)
+						negative_semi_tmp.push_back(make_pair(diff_dist,j));
+				}
+			}
+	
+			if (negative_tmp.size()==0)
+				continue;
+			
+			sort(negative_tmp.begin(),negative_tmp.end());
+			// hardest
+			int idx_tmp=negative_tmp[0].second;
+			// random
+			if (stype=="random")
+			{
+				idx_tmp=negative_tmp[rand()%negative_tmp.size()].second;
+			}else
+			// hardest semi
+			if (stype=="m-semi")
+			{
+				if (negative_semi_tmp.size()>0)
+				{	
+					sort(negative_semi_tmp.begin(),negative_semi_tmp.end());
+					idx_tmp=negative_semi_tmp[0].second;
+				}
+			}else
+			// random semi
+			if (stype=="r-semi")
+			{
+				if (negative_semi_tmp.size()>0)
+					idx_tmp=negative_semi_tmp[rand()%negative_semi_tmp.size()].second;
+			}
+			assert(idx_tmp>=0 && idx_tmp<row);
+			loss+= max(0.0f, cpu_dist_p[i*row+i+1] + margin  - cpu_dist_p[i*row+idx_tmp])/2.0f;
+			// compute diff
+			_inputs[1]->copy(*a_tmp,i,i+1,0,col,0,0);
+			_inputs[1]->copy(*p_tmp,i+1,i+2,0,col,0,0);
+			_inputs[1]->copy(*n_tmp,idx_tmp,idx_tmp+1,0,col,0,0);
+			
+			// a : n-p
+			diff->copy(*diff_tmp,i,i+1,0,col,0,0);
+			n_tmp->subtract(*p_tmp,*apn_tmp);
+			diff_tmp->add(*apn_tmp);
+			diff_tmp->copy(*diff,0,1,0,col,i,0);
+	
+			// p : p-a
+			diff->copy(*diff_tmp,i+1,i+2,0,col,0,0);
+			if (ltype=="hinge")
+			{
+				a_tmp->copy(*apn_tmp);
+				apn_tmp->apply(NVMatrixOps::MultByScalar(-1));
+				diff_tmp->add(*apn_tmp);
+				diff_tmp->copy(*diff,0,1,0,col,i+1,0);
+			}
+			else
+			{
+				p_tmp->subtract(*a_tmp,*apn_tmp);
+				diff_tmp->add(*apn_tmp);
+				diff_tmp->copy(*diff,0,1,0,col,i+1,0);
+			}
+			
+			// n : a-n
+			diff->copy(*diff_tmp,idx_tmp,idx_tmp+1,0,col,0,0);
+			if (ltype=="hinge")
+			{
+				a_tmp->copy(*apn_tmp);
+				diff_tmp->add(*apn_tmp);
+				diff_tmp->copy(*diff,0,1,0,col,idx_tmp,0);
+			}
+			else
+			{
+				a_tmp->subtract(*n_tmp,*apn_tmp);
+				diff_tmp->add(*apn_tmp);
+				diff_tmp->copy(*diff,0,1,0,col,idx_tmp,0);
+			}
+
+			used++;
+			meanT+=cpu_dist_p[i*row+i+1];
+			meanF+=cpu_dist_p[i*row+idx_tmp];
+		}
+		_costv.clear();
+		_costv.push_back(loss);
+		_costv.push_back(used*2.0/row*_inputs[0]->getNumRows());
+		if (used!=0)
+		{
+			_costv.push_back(meanT*1.0/(used)*_inputs[0]->getNumRows());
+			_costv.push_back(meanF*1.0/(used)*_inputs[0]->getNumRows());
+		}
+		else
+		{
+			_costv.push_back(0);
+			_costv.push_back(0);
+		}
+		_costv.push_back(sNum*2.0/row*_inputs[0]->getNumRows());
+
+		delete cpu_dist;
+		delete cpu_label;
+		delete a_tmp;
+		delete p_tmp;
+		delete n_tmp;
+		delete apn_tmp;
+		delete diff_tmp;
+	}
+}
+
+void HardTripletLossLayer::bpropActs(NVMatrix& v,int replicaIdx, int inpIdx, float scaleTargets, PASS_TYPE passType) {
+	
+	if (inpIdx == 1) 
+	{
+		assert(diff->isTrans()==true);
+		assert(_prev[replicaIdx][1]->getActsGrad().isTrans()==true);
+		diff->apply(NVMatrixOps::MultByScalar(-_coeff));
+		if (scaleTargets==0)
+		{
+			assert(scaleTargets==0);
+			diff->copy(_prev[replicaIdx][1]->getActsGrad());
+		}
+		else
+		{
+			assert(scaleTargets==1);
+			_prev[replicaIdx][1]->getActsGrad().add(*diff);
+		}
+	}
+}
+
+/*
+ * =======================
+ * ContrastiveLossLayer  
+ * =======================
+ */
+ContrastiveLossLayer::ContrastiveLossLayer(ConvNetThread* convNetThread, PyObject* paramsDict, int replicaID) : CostLayer(convNetThread, paramsDict,replicaID, true) {
+	stype = pyDictGetString(paramsDict, "stype");
+	mtype = pyDictGetString(paramsDict, "mtype");
+	margin = pyDictGetFloat(paramsDict, "margin");
+	//new
+	positive1 = new NVMatrix();
+	positive2 = new NVMatrix();
+	negative1 = new NVMatrix();
+	diff_p1p2 = new NVMatrix();
+	diff_p1n1 = new NVMatrix();
+	diff_p1p2_sq = new NVMatrix();
+	diff_p1n1_sq = new NVMatrix();
+	dis_p1p2 = new NVMatrix();
+	dis_p1n1 = new NVMatrix();
+	isbigger = new Matrix();
+	
+	//old
+	old_diff = new NVMatrix();
+}
+
+void ContrastiveLossLayer::fpropActs(int inpIdx, float scaleTargets, PASS_TYPE passType, int passIdx) {
+	
+	if (inpIdx==0)
+	{
+		return;
+	}
+	//if (stype == "newStyle") 
+	//{
+	//	assert(_inputs[1]->getNumRows()%3==0 && _inputs[0]->getNumCols()==1);
+	//	int row=_inputs[1]->getNumRows()/3;
+	//	int col=_inputs[1]->getNumCols();
+	//	//kankan(*_inputs[1],"in0");
+	//	//kankan(*_inputs[0],"id0");
+	//	positive1->resize(row,col);
+	//	positive2->resize(row,col);
+	//	negative1->resize(row,col);
+	//	positive1->setTrans(true);
+	//	positive2->setTrans(true);
+	//	negative1->setTrans(true);
+	//	assert(_inputs[1]->isTrans()==true);
+	//	_inputs[1]->copy(*positive1,	0,		row,	0,col,0,0);
+	//	_inputs[1]->copy(*positive2,	row,	row*2,	0,col,0,0);
+	//	_inputs[1]->copy(*negative1,	row*2,	row*3,	0,col,0,0);
+	//	
+	//	positive1->subtract(*positive2,*diff_p1p2);
+	//	positive1->subtract(*negative1,*diff_p1n1);
+	//	
+	//	assert(diff_p1p2->isTrans()==true);
+	//	assert(diff_p1n1->isTrans()==true);
+	//	diff_p1p2->apply(NVMatrixOps::Square(),*diff_p1p2_sq);
+	//	diff_p1n1->apply(NVMatrixOps::Square(),*diff_p1n1_sq);
+	//	diff_p1p2_sq->sum(1,*dis_p1p2);
+	//	diff_p1n1_sq->sum(1,*dis_p1n1);
+	//	
+	//	loss=0;
+	//	Matrix *cpu_dis_p1p2 = new Matrix(dis_p1p2->getNumRows(),dis_p1p2->getNumCols());
+	//	Matrix *cpu_dis_p1n1 = new Matrix(dis_p1n1->getNumRows(),dis_p1n1->getNumCols());
+	//	assert(dis_p1p2->isTrans()==true);
+	//	assert(dis_p1p2->getNumCols()==1);
+	//	assert(dis_p1n1->isTrans()==true);
+	//	assert(dis_p1n1->getNumCols()==1);
+	//	dis_p1p2->copyToHost(*cpu_dis_p1p2);
+	//	dis_p1n1->copyToHost(*cpu_dis_p1n1);
+	//	float* p1=cpu_dis_p1p2->getData();
+	//	float* p2=cpu_dis_p1n1->getData();
+	//	
+	//	isbigger->resize(row,1);
+	//	isbigger->setTrans(true);
+	//	float* b1=isbigger->getData();
+
+	//	int usedf = 0;
+	//	int usedt = 0;
+	//	int trueNum = row;
+	//	int falseNum = row;
+	//	old_diff->resize(*_inputs[1]);
+	//	old_diff->setTrans(true);
+	//	old_diff->apply(NVMatrixOps::Zero());
+
+	//	float meanT=0;
+	//	float meanF=0;
+	//	if (mtype=="adapt")// adaptive
+	//	{
+	//		float* allvalue = new float[row*2];
+	//		bool* allidx = new bool[row*2];
+	//		for (int i=0;i<row;++i)
+	//		{
+	//			allvalue[i]=sqrt(p1[i]);
+	//			allvalue[i+row]=sqrt(p2[i]);
+	//			allidx[i]=true;
+	//			allidx[i+row]=false;
+	//		}
+	//		int maxRight=-1;
+	//		for (int i=0;i<row*2;++i)
+	//		{
+	//			int right_tmp=0;
+	//			float tmp_margin=allvalue[i];
+	//			for(int j=0;j<row*2;++j)
+	//			{
+	//				if (allvalue[j]<tmp_margin)
+	//				{
+	//					if (allidx[j]==true)
+	//					{
+	//						right_tmp++;
+	//					}
+	//				}
+	//				else
+	//				{
+	//					if (allidx[j]==false)
+	//					{
+	//						right_tmp++;
+	//					}
+	//				}
+	//			}
+	//			if (right_tmp>maxRight)
+	//			{
+	//				maxRight=right_tmp;
+	//				margin=tmp_margin;
+	//			}
+	//		}
+	//		delete[] allvalue;
+	//		delete[] allidx;
+	//	}
+
+	//	for (int i=0;i<row;++i)
+	//	{
+	//		float v1 = p1[i];
+	//		float v2 = max(0.0f,margin-sqrt(p2[i]));
+	//		meanT+=sqrt(p1[i]);
+	//		meanF+=sqrt(p2[i]);
+
+	//		if (sqrt(v1)>margin)
+	//		{
+	//			usedt++;
+	//		}
+	//		if (v2>0)
+	//		{
+	//			b1[i]=v2/(sqrt(p2[i])+FLT_MIN);
+	//			usedf++;
+	//			//cout<<"hah\n";
+	//		}
+	//		else
+	//		{
+	//			b1[i]=0;
+	//		}
+	//		v2=v2*v2;
+	//		loss+=(v1+v2);
+	//	}
+	//	loss/=2;
+	//	//loss/=(row*2);
+	//	_costv.clear();
+	//	_costv.push_back(loss);
+	//	if(trueNum!=0)
+	//		_costv.push_back(usedt*1.0/(trueNum)*_inputs[0]->getNumRows());
+	//	else
+	//		_costv.push_back(0);
+	//	if(falseNum!=0)
+	//		_costv.push_back(usedf*1.0/(falseNum)*_inputs[0]->getNumRows());
+	//	else
+	//		_costv.push_back(0);
+	//	_costv.push_back(meanT/(row)*_inputs[0]->getNumRows());
+	//	_costv.push_back(margin*_inputs[0]->getNumRows());
+	//	_costv.push_back(meanF/(row)*_inputs[0]->getNumRows());
+	//	delete cpu_dis_p1p2;
+	//	delete cpu_dis_p1n1;
+	//	return;
+	//}
+
+	if (stype=="oldStyle")
+	{
+		assert(_inputs[0]->getNumRows()%2==0 && _inputs[0]->getNumCols()==1);
+		int row=_inputs[1]->getNumRows()/2;
+		int col=_inputs[1]->getNumCols();
+		Matrix* label_cpu = new Matrix(_inputs[0]->getNumRows(),_inputs[0]->getNumCols());
+		_inputs[0]->copyToHost(*label_cpu);
+		float* label_cpu_data = label_cpu->getData();
+		
+		old_diff->resize(*_inputs[1]);
+		old_diff->setTrans(true);
+		old_diff->apply(NVMatrixOps::Zero());
+
+		int usedf = 0;
+		int usedt = 0;
+		int falseNum = 0;
+		int trueNum = 0;
+		loss=0;
+		assert(_inputs[1]->isTrans()==true);
+
+		NVMatrix* tmp1= new NVMatrix(1,col,true);
+		NVMatrix* tmp2= new NVMatrix(1,col,true);
+		NVMatrix* tmpsum = new NVMatrix(1,1,true);
+		Matrix* sum_cpu = new Matrix(1,1);
+		
+		float meanT=0;
+		float meanF=0;
+		if (mtype=="adapt")// adaptive
+		{
+			float* allvalue = new float[row];
+			bool* allidx = new bool[row];
+			for (int i=0;i<row;++i)
+			{
+				_inputs[1]->copy(*tmp1,i*2,i*2+1,0,col,0,0);
+				_inputs[1]->copy(*tmp2,i*2+1,i*2+1+1,0,col,0,0);
+				tmp1->subtract(*tmp2);
+				//tmp1->copy(*tmp2);
+				tmp1->apply(NVMatrixOps::Square());
+				tmp1->sum(1,*tmpsum);
+				tmpsum->copyToHost(*sum_cpu);
+				float* sump=sum_cpu->getData();
+				if (abs(label_cpu_data[i*2]-label_cpu_data[i*2+1])<FLT_EPSILON
+					|| (int)label_cpu_data[i*2]==(int)label_cpu_data[i*2+1] )
+				{
+					trueNum++;
+					allvalue[i]=sqrt(sump[0]);
+					allidx[i]=true;
+				}
+				else
+				{
+					falseNum++;
+					allvalue[i]=sqrt(sump[0]);
+					allidx[i]=false;
+				}
+			}
+			float maxRight=-1;
+			for (int i=0;i<row;++i)
+			{
+				float tmp_margin=allvalue[i];
+				int right_s=0;
+				int right_f=0;
+				for(int j=0;j<row;++j)
+				{
+					if (allvalue[j]<tmp_margin)
+					{	if (allidx[j]==true)
+							right_s++;
+					}
+					else
+					{
+						if (allidx[j]==false)
+							right_f++;
+					}
+				}
+				//float score = (right_s*1.0/trueNum)+(right_f*1.0/falseNum);
+				float score = right_s+right_f;
+				if ( score > maxRight)
+				{
+					maxRight=score;
+					margin=tmp_margin;
+				}
+				else
+					if (abs(score-maxRight)<FLT_EPSILON && tmp_margin<margin)
+					{
+						margin=tmp_margin;
+					}
+			}
+			delete[] allvalue;
+			delete[] allidx;
+		}
+		trueNum=0;
+		falseNum=0;
+		for (int i=0;i<row;++i)
+		{
+			_inputs[1]->copy(*tmp1,i*2,i*2+1,0,col,0,0);
+			_inputs[1]->copy(*tmp2,i*2+1,i*2+1+1,0,col,0,0);
+			tmp1->subtract(*tmp2);
+			tmp1->copy(*tmp2);
+			tmp1->apply(NVMatrixOps::Square());
+			tmp1->sum(1,*tmpsum);
+			tmpsum->copyToHost(*sum_cpu);
+			float* sump=sum_cpu->getData();
+			if (abs(label_cpu_data[i*2]-label_cpu_data[i*2+1])<FLT_EPSILON
+				|| (int)label_cpu_data[i*2]==(int)label_cpu_data[i*2+1] )
+			{
+				trueNum++;
+				meanT+=sqrt(sump[0]);
+				
+				tmp2->copy(*old_diff,0,1,0,col,i*2,0);
+				tmp2->apply(NVMatrixOps::MultByScalar(-1));
+				tmp2->copy(*old_diff,0,1,0,col,i*2+1,0);
+				
+				if (sqrt(sump[0])>margin)
+					usedt++;
+				loss=loss+(sump[0]);
+			}
+			else
+			{
+				falseNum++;
+				meanF+=sqrt(sump[0]);
+				float tmp=max(0.0f,margin-sqrt(sump[0]));
+				tmp=tmp*tmp;
+				if (tmp>0)
+				{
+					usedf++;
+					tmp2->apply( NVMatrixOps::MultByScalar(sqrt(tmp)/(sqrt(sump[0])+FLT_MIN)) );
+					tmp2->copy(*old_diff,0,1,0,col,i*2+1,0);
+					tmp2->apply(NVMatrixOps::MultByScalar(-1));
+					tmp2->copy(*old_diff,0,1,0,col,i*2,0);
+				}
+				loss=loss+tmp;
+			}
+		}
+		delete tmp1;
+		delete tmp2;
+		delete tmpsum;
+		delete sum_cpu;
+
+		loss/=2;
+		_costv.clear();
+		_costv.push_back(loss);
+		if(trueNum!=0)
+			_costv.push_back(usedt*1.0/(trueNum)*_inputs[1]->getNumRows());
+		else
+			_costv.push_back(0);
+		if(falseNum!=0)
+			_costv.push_back(usedf*1.0/(falseNum)*_inputs[1]->getNumRows());
+		else
+			_costv.push_back(0);
+		if(trueNum!=0)
+			_costv.push_back(meanT/(trueNum)*_inputs[1]->getNumRows());
+		else
+			_costv.push_back(0);
+		_costv.push_back(margin*_inputs[1]->getNumRows());
+		if(falseNum!=0)
+			_costv.push_back(meanF/(falseNum)*_inputs[1]->getNumRows());
+		else
+			_costv.push_back(0);
+		delete label_cpu;
+	}
+}
+
+void ContrastiveLossLayer::bpropActs(NVMatrix& v, int replicaIdx, int inpIdx, float scaleTargets, PASS_TYPE passType) {
+	if (inpIdx==0)
+	{
+		return;
+	}
+	//if (stype == "newStyle")
+	//{
+	//	assert(_inputs[1]->getNumRows()%3==0  && _inputs[0]->getNumCols()==1);
+	//	int row=_inputs[1]->getNumRows()/3;
+	//	int col=_inputs[1]->getNumCols();
+	//	
+	//	NVMatrix* tmp1 = new NVMatrix(isbigger->getNumRows(),isbigger->getNumCols());
+	//	tmp1->copyFromHost(*isbigger);
+	//	assert(tmp1->isTrans()==true);
+	//	NVMatrix* p1n1 = new NVMatrix();
+	//	assert(diff_p1n1->isTrans()==true);
+	//	diff_p1n1->applyBinaryV(NVMatrixBinaryOps::Multiply(),*tmp1,*p1n1);	
+	//	assert(p1n1->isTrans()==true);
+	//	
+	//	_prev[1]->getActsGrad().resize(row*3,col);
+	//	//p1:p1-p2
+	//	diff_p1p2->copy(_prev[1]->getActsGrad(),0,row,0,col,0,0);
+	//	//p2:p2-p1
+	//	diff_p1p2->apply(NVMatrixOps::MultByScalar(-1));
+	//	diff_p1p2->copy(_prev[1]->getActsGrad(),0,row,0,col,row,0);
+	//	
+	//	//n1:p1-n1
+	//	p1n1->copy(_prev[1]->getActsGrad(),0,row,0,col,row*2,0);
+	//	//p1:n1-p1
+	//	p1n1->apply(NVMatrixOps::MultByScalar(-1));
+	//	diff_p1p2->apply(NVMatrixOps::MultByScalar(-1));
+	//	p1n1->add(*diff_p1p2);
+	//	p1n1->copy(_prev[1]->getActsGrad(),0,row,0,col,0,0);
+	//	
+	//	assert(_prev[1]->getActsGrad().isTrans()==true);
+	//	_prev[1]->getActsGrad().apply(NVMatrixOps::MultByScalar(-_coeff));
+
+	//	delete tmp1;
+	//	delete p1n1;
+
+	//	return;
+	//}
+
+	if (stype=="oldStyle")
+	{
+		assert(old_diff->isTrans()==true);
+		assert(_prev[replicaIdx][1]->getActsGrad().isTrans()==true);
+		old_diff->apply(NVMatrixOps::MultByScalar(-_coeff));
+		if (scaleTargets==0)
+		{
+			assert(scaleTargets==0);
+			old_diff->copy(_prev[replicaIdx][1]->getActsGrad());
+		}
+		else
+		{
+			assert(scaleTargets==1);
+			_prev[replicaIdx][1]->getActsGrad().add(*old_diff);
+		}
+		return;
+	}
+}
