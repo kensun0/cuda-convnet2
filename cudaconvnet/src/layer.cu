@@ -2455,8 +2455,8 @@ void HardTripletLossLayer::fpropActs(int inpIdx, float scaleTargets, PASS_TYPE p
 		int sNum=0;
 		for (int i=0;i<row;i+=2)
 		{
-			vector<pair<float,int>> negative_tmp;
-			vector<pair<float,int>> negative_semi_tmp;
+			vector< pair<float,int> > negative_tmp;
+			vector< pair<float,int> > negative_semi_tmp;
 			int label1 = cpu_label_p[i];
 			if(label1>=startID)
 				sNum++;

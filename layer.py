@@ -1477,9 +1477,9 @@ class SumOfSquaresCostParser(CostParser):
         dic = CostParser.parse(self, name, mcp, prev_layers, model)
         print "Initialized sum-of-squares cost '%s' on GPUs %s" % (name, dic['gpus'])
         return dic
-////////////////////////////////////////////////////////////////////////////////////////////////////
-/* sun added */
-////////////////////////////////////////////////////////////////////////////////////////////////////
+#////////////////////////////////////////////////////////////////////////////////////////////////////
+#/* sun added */
+#////////////////////////////////////////////////////////////////////////////////////////////////////
 class NormalizeLayerParser(LayerWithInputParser):
     def __init__(self):
         LayerWithInputParser.__init__(self, num_inputs=1)
@@ -1487,7 +1487,7 @@ class NormalizeLayerParser(LayerWithInputParser):
     def parse(self, name, mcp, prev_layers, model):
         dic = LayerWithInputParser.parse(self, name, mcp, prev_layers, model)
         dic['outputs'] = dic['numInputs'][0]
-        print "Initialized Normalize layer, producing %d output, on GPUs %s" % (dic['outputs'], dic['gpus'])
+        print "Initialized Normalize layer '%s', on GPUs %s, producing %d output" % (name, dic['gpus'], dic['outputs'])
         return dic  
 class HardTripletCostParser(CostParser):
     def __init__(self):
@@ -1495,7 +1495,7 @@ class HardTripletCostParser(CostParser):
         
     def parse(self, name, mcp, prev_layers, model):
         dic = CostParser.parse(self, name, mcp, prev_layers, model)
-        print "Initialized Hard Triplet cost %s layer, on GPUs %s" % (name, dic['gpus'])
+        print "Initialized Hard Triplet cost layer '%s', on GPUs %s" % (name, dic['gpus'])
         return dic
     		
     def add_params(self, mcp):
@@ -1512,7 +1512,7 @@ class ContrastiveCostParser(CostParser):
         
     def parse(self, name, mcp, prev_layers, model):
         dic = CostParser.parse(self, name, mcp, prev_layers, model)
-        print "Initialized Contrastive loss %s layer, on GPUs %s" % (name, dic['gpus'])
+        print "Initialized Contrastive loss layer '%s', on GPUs %s" % (name, dic['gpus'])
         return dic
     		
     def add_params(self, mcp):
@@ -1550,7 +1550,7 @@ layer_parsers = {'data' :           lambda : DataLayerParser(),
                  'pass':            lambda : PassThroughLayerParser(),
                  'dropout':         lambda : DropoutLayerParser(),
                  'dropout2':        lambda : Dropout2LayerParser(),
-                 'normlize':        lambda : NormalizeLayerParser(),
+                 'normalize':       lambda : NormalizeLayerParser(),
                  'cost.logreg':     lambda : LogregCostParser(),
                  'cost.crossent':   lambda : CrossEntCostParser(),
                  'cost.bce':        lambda : BinomialCrossEntCostParser(),

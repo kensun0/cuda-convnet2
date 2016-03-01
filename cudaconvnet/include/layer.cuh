@@ -23,6 +23,7 @@
 #include <map>
 #include <assert.h>
 #include <helper_timer.h>
+#include <float.h>
 #include "../../nvmatrix/include/nvmatrix.cuh"
 //#include "experimental/akrizhevsky/g3/mactruck-gpu-tests/gpu_util.cuh"
 
@@ -866,8 +867,8 @@ public:
 	NVMatrix* tran;
 	NVMatrix* dist;
 	NVMatrix* diff;
-	string stype;
-	string ltype;
+	std::string stype;
+	std::string ltype;
 	int startID;
 	
 };
@@ -884,8 +885,8 @@ public:
 	ContrastiveLossLayer(ConvNetThread* convNetThread, PyObject* paramsDict, int replicaID);
 	float margin;
 	float loss;
-	string mtype;
-	string stype;
+	std::string mtype;
+	std::string stype;
 
 	//new
 	NVMatrix* positive1;
