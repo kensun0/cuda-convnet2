@@ -807,6 +807,76 @@ protected:
 public:
     SumOfSquaresCostLayer(ConvNetThread* convNetThread, PyObject* paramsDict, int replicaID);
 };
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+/* sun added */
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+/* 
+ * =======================
+ * NormalizeLayer
+ * =======================
+ */
+class NormalizeLayer : public Layer {
+protected:
+	void fpropActs(int inpIdx, float scaleTargets, PASS_TYPE passType, int passIdx);
+	void bpropActs(NVMatrix& v, int replicaIdx, int inpIdx, float scaleTargets, PASS_TYPE passType);
+public:
+	NormalizeLayer(ConvNetThread* convNetThread, PyObject* paramsDict,int replicaID);
+	NVMatrix* norm;
+};
+/* 
+ * =======================
+ * HardTripletLossLayer
+ * =======================
+ */
+class HardTripletLossLayer : public CostLayer {
+protected:
+	void fpropActs(int inpIdx, float scaleTargets, PASS_TYPE passType, int passIdx);
+	void bpropActs(NVMatrix& v, int replicaIdx, int inpIdx, float scaleTargets, PASS_TYPE passType);
+public:
+	HardTripletLossLayer(ConvNetThread* convNetThread, PyObject* paramsDict,int replicaID);
+	float margin;
+	NVMatrix* tran;
+	NVMatrix* dist;
+	NVMatrix* diff;
+	string stype;
+	string ltype;
+	int startID;
+	
+};
+/* 
+ * =======================
+ * ContrastiveLossLayer
+ * =======================
+ */
+class ContrastiveLossLayer : public CostLayer {
+protected:
+	void fpropActs(int inpIdx, float scaleTargets, PASS_TYPE passType, int passIdx);
+	void bpropActs(NVMatrix& v, int replicaIdx, int inpIdx, float scaleTargets, PASS_TYPE passType);
+public:
+	ContrastiveLossLayer(ConvNetThread* convNetThread, PyObject* paramsDict, int replicaID);
+	float margin;
+	float loss;
+	string mtype;
+	string stype;
 
+	//new
+	NVMatrix* positive1;
+	NVMatrix* positive2;
+	NVMatrix* negative1;
+	
+	NVMatrix* diff_p1p2;
+	NVMatrix* diff_p1n1;
+	
+	NVMatrix* diff_p1p2_sq;
+	NVMatrix* diff_p1n1_sq;
+	
+	NVMatrix* dis_p1p2;
+	NVMatrix* dis_p1n1;
+
+	Matrix* isbigger;
+	
+	//old
+	NVMatrix* old_diff;
+};
 #endif    /* LAYER_CUH */
 
