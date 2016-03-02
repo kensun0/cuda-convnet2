@@ -38,7 +38,15 @@ void localFilterActs(NVMatrix& images, NVMatrix& filters, NVMatrix& targets,
                      int imgSizeY, int numModulesY, int numModulesX, int paddingStart, int moduleStride,
                      int numImgColors, int numGroups,
                      float scaleTargets, float scaleOutput);
-
+///////////////////////////////////////////////////////////////////////
+void st_localFilterActs(NVMatrix& images, NVMatrix& filters, NVMatrix& targets,
+                     int imgSizeY, int numModulesY, int numModulesX, int paddingStart, int moduleStride,
+                     int numImgColors, int numGroups, int tileWidth, int tileHeight);
+void st_localFilterActs(NVMatrix& images, NVMatrix& filters, NVMatrix& targets,
+                     int imgSizeY, int numModulesY, int numModulesX, int paddingStart, int moduleStride,
+                     int numImgColors, int numGroups,
+                     float scaleTargets, float scaleOutput, int tileWidth, int tileHeight);
+///////////////////////////////////////////////////////////////////////
 void convImgActs(NVMatrix& hidActs, NVMatrix& filters, NVMatrix& targets,
                  int imgSizeY, int imgSizeX, int numModulesY, int paddingStart, int moduleStride, int numImgColors, int numGroups);
 void convImgActs(NVMatrix& hidActs, NVMatrix& filters, NVMatrix& targets,
@@ -50,7 +58,13 @@ void localImgActs(NVMatrix& hidActs, NVMatrix& filters, NVMatrix& targets,
 void localImgActs(NVMatrix& hidActs, NVMatrix& filters, NVMatrix& targets,
                   int imgSizeY, int imgSizeX, int numModulesY, int paddingStart, int moduleStride, int numImgColors, int numGroups,
                   float scaleTargets, float scaleOutput);
-
+/////////////////////////////////////////////////////////////////////
+void st_localImgActs(NVMatrix& hidActs, NVMatrix& filters, NVMatrix& targets,
+                  int imgSizeY, int imgSizeX, int numModulesY, int paddingStart, int moduleStride, int numImgColors, int numGroups, int tileWidth, int tileHeight);
+void st_localImgActs(NVMatrix& hidActs, NVMatrix& filters, NVMatrix& targets,
+                  int imgSizeY, int imgSizeX, int numModulesY, int paddingStart, int moduleStride, int numImgColors, int numGroups,
+                  float scaleTargets, float scaleOutput, int tileWidth, int tileHeight);
+/////////////////////////////////////////////////////////////////////
 void convWeightActs(NVMatrix& images, NVMatrix& hidActs, NVMatrix& targets,
                     int imgSizeY, int numModulesY, int numModulesX, int filterSize, int paddingStart,
                     int moduleStride, int numImgColors, int numGroups, int sumWidth);
@@ -66,6 +80,13 @@ void localWeightActs(NVMatrix& images, NVMatrix& hidActs, NVMatrix& targets,
 void localWeightActs(NVMatrix& images, NVMatrix& hidActs, NVMatrix& targets,
                      int imgSizeY, int numModulesY, int numModulesX, int filterSize, int paddingStart, int moduleStride,
                      int numImgColors, int numGroups, float scaleTargets, float scaleOutput);
+/////////////////////////////////////////////////////////////////////
+void st_localWeightActs(NVMatrix& images, NVMatrix& hidActs, NVMatrix& targets,
+                     int imgSizeY, int numModulesY, int numModulesX, int filterSize, int paddingStart,
+                     int moduleStride, int numImgColors, int numGroups, int tileWidth, int tileHeight);
 
+void st_localWeightActs(NVMatrix& images, NVMatrix& hidActs, NVMatrix& targets,
+                     int imgSizeY, int numModulesY, int numModulesX, int filterSize, int paddingStart, int moduleStride,
+                     int numImgColors, int numGroups, float scaleTargets, float scaleOutput, int tileWidth, int tileHeight);
 #endif	/* COMMON_CUH */
 

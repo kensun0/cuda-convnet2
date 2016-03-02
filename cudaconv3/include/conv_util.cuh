@@ -55,6 +55,7 @@ void convRGBToYUV(NVMatrix& images, NVMatrix& target);
 void convRGBToLAB(NVMatrix& images, NVMatrix& target, bool center);
 void convCrop(NVMatrix& imgs, NVMatrix& target, int imgSize, int tgtSize, int startY, int startX);
 void normalizeLocalWeights(NVMatrix& weights, int numModules, float norm);
+void st_normalizeLocalWeights(NVMatrix& weights, int numModules, float norm, int tileWidth, int tileHeight);
 void convContrastNormCrossMap(NVMatrix& images, NVMatrix& meanDiffs, NVMatrix& target,
                              int numFilters, int sizeF, float addScale, float powScale, float minDiv, bool blocked);
 void convResponseNormCrossMapUndo(NVMatrix& outGrads, NVMatrix& inputs, NVMatrix& acts, NVMatrix& target, int numFilters,

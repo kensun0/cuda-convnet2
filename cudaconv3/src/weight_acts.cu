@@ -2734,3 +2734,15 @@ void localWeightActs(NVMatrix& images, NVMatrix& hidActs, NVMatrix& targets,
     _weightActs(images, hidActs, targets, imgSizeY, numModulesY, numModulesX, filterSize, paddingStart, moduleStride, numImgColors, numGroups, 1,
                 scaleTargets, scaleOutput);
 }
+////////////////////////////////////////////////////////////////////////////////////////////
+void st_localWeightActs(NVMatrix& images, NVMatrix& hidActs, NVMatrix& targets,
+                       int imgSizeY, int numModulesY, int numModulesX, int filterSize, int paddingStart, int moduleStride, int numImgColors, int numGroups, int tileWidth, int tileHeight) {
+    _weightActs(images, hidActs, targets, imgSizeY, numModulesY, numModulesX, filterSize, paddingStart, moduleStride, numImgColors, numGroups, 1, 0, 1);
+}
+
+void st_localWeightActs(NVMatrix& images, NVMatrix& hidActs, NVMatrix& targets,
+                    int imgSizeY, int numModulesY, int numModulesX, int filterSize, int paddingStart, int moduleStride,
+                    int numImgColors, int numGroups, float scaleTargets, float scaleOutput, int tileWidth, int tileHeight) {
+    _weightActs(images, hidActs, targets, imgSizeY, numModulesY, numModulesX, filterSize, paddingStart, moduleStride, numImgColors, numGroups, 1,
+                scaleTargets, scaleOutput);
+}

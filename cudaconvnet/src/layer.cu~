@@ -1178,6 +1178,169 @@ void LocalUnsharedLayer::_constrainWeights() {
 
 /*
  * =======================
+ * st_LocalUnsharedLayer
+ * =======================
+ */
+st_LocalUnsharedLayer::st_LocalUnsharedLayer(ConvNetThread* convNetThread, PyObject* paramsDict, int replicaID)
+    : LocalLayer(convNetThread, paramsDict, replicaID, false) {
+    tileWidth = pyDictGetInt(paramsDict,"tileWidth");
+    tileHeight = pyDictGetInt(paramsDict,"tileHeight");
+}
+
+void st_LocalUnsharedLayer::fpropActs(int inpIdx, float scaleTargets, PASS_TYPE passType, int passIdx) {
+    st_localFilterActs(*_inputs[inpIdx], getWeightMatrix(passType, inpIdx), getActs(), _imgSize->at(inpIdx), _modulesX, _modulesX, _padding->at(inpIdx),
+                    _stride->at(inpIdx), _channels->at(inpIdx), _groups->at(inpIdx), scaleTargets, 1, tileWidth, tileHeight);
+    if (scaleTargets == 0) {
+	NVMatrix* gpuBias2 = new NVMatrix();
+	gpuBias2->resize(_modules*_numFilters,1);
+	Matrix* cpuBias2 = new Matrix(gpuBias2->getNumRows(),gpuBias2->getNumCols());
+
+	Matrix* cpuBias = new Matrix(_biases->getW().getNumRows(),_biases->getW().getNumCols());
+	_biases->getW().copyToHost(*cpuBias);
+	float* biasIdx = cpuBias->getData();		// (moduleX/tileWidth)*(moduleX/tileHeight)*_numFilters
+	float* biasIdx2 = cpuBias2->getData();		// moduleX*moduleX*_numFilters
+			
+	for (int k=0;k<_numFilters;++k){
+		for (int i=0;i<_modulesX;++i){
+			for (int j=0;j<_modulesX;++j){
+				int st_idx1 = j/tileWidth;
+				int st_idx2 = i/tileHeight;
+				*(biasIdx2+k*_modulesX*_modulesX+i*_modulesX+j)=
+					*(biasIdx+k*_modulesX/tileWidth*_modulesX/tileWidth +(st_idx2*_modulesX/tileWidth+st_idx1));
+			}
+		}
+	}
+	gpuBias2->copyFromHost(*cpuBias2);
+	/*kankan(_biases->getW(),"bias1");
+	kankan(*gpuBias2,"bias2");*/
+	getActs().addVector(*gpuBias2);
+	//kankan(*gpuBias2,"b2");
+	delete gpuBias2;
+	delete cpuBias2;
+	delete cpuBias;
+        //getActs().addVector(getBiasMatrix(passType));
+    }
+}
+
+void st_LocalUnsharedLayer::bpropBiases(NVMatrix& v, PASS_TYPE passType) {
+	//ori:  _biases->getGrad().addSum(v, 1, getBIncScale(), getBGradScale(passType));
+
+	NVMatrix* gpuV = new NVMatrix();
+	gpuV->addSum(v,1,0,1);
+	Matrix* cpuV = new Matrix(gpuV->getNumRows(),gpuV->getNumCols());
+	gpuV->copyToHost(*cpuV);
+	Matrix* cpuV2 = new Matrix(gpuV->getNumRows()/tileWidth/tileHeight,gpuV->getNumCols());
+	cpuV2->apply(Matrix::ZERO);
+	float* vIdx = cpuV->getData();		// moduleX*moduleY*numFilter
+	float* vIdx2 = cpuV2->getData();	// (moduleX/tileWidth)*(moduleX/tileHeight)*numFilter
+	for (int k=0;k<_numFilters;++k){
+		for (int i=0;i<_modulesX;++i){
+			for (int j=0;j<_modulesX;++j){
+				int st_idx1 = j/tileWidth;
+				int st_idx2 = i/tileHeight;
+				*(vIdx2 + k*_modulesX/tileWidth*_modulesX/tileWidth + st_idx2*_modulesX/tileWidth + st_idx1)+=
+					*(vIdx + k*_modulesX*_modulesX + i*_modulesX + j);
+			}
+		}
+	}
+	NVMatrix* gpuV2 = new NVMatrix();
+	gpuV2->resize(*cpuV2);
+	gpuV2->copyFromHost(*cpuV2);
+
+	//kankan(*gpuV2,"vv2");
+	//
+	//kankan(_biases->getGrad(),"bias2");
+	_biases->getGrad().add(*gpuV2, getBIncScale(), getBGradScale(passType));
+	//kankan(v,"v2");
+	//kankan(_biases->getGrad(),"vb2");
+
+	delete gpuV;
+	delete gpuV2;
+	delete cpuV2;
+	delete cpuV;
+}
+
+void st_LocalUnsharedLayer::bpropWeights(NVMatrix& v, int replicaIdx, int inpIdx, PASS_TYPE passType) {
+//assert(inpIdx==0);
+//assert((_padding->at(inpIdx)*-2+1) == _filterSize[inpIdx]);
+//assert(_stride->at(inpIdx)==1);
+//assert(_imgSize->at(inpIdx)/tileWidth>=_filterSize[inpIdx]);
+//printf("bp weight\n");
+
+    NVMatrix* _weightIncTmp1 = new NVMatrix();
+    _weightIncTmp1->resize( _modulesX * _modulesX * _channels->at(inpIdx) *_filterSize->at(inpIdx), _numFilters);
+
+    float scaleWGrad = getGradScale(inpIdx, passType);
+    float scaleInc = getIncScale(inpIdx, passType);
+    st_localWeightActs(*_inputs[inpIdx], v, *_weightIncTmp1, _imgSize->at(inpIdx), _modulesX, _modulesX, _filterSize->at(inpIdx), _padding->at(inpIdx),
+                    _stride->at(inpIdx), _channels->at(inpIdx), _groups->at(inpIdx), scaleInc, scaleWGrad,  tileWidth, tileHeight);
+
+//cout<<_channels->at(inpIdx)<<"   "<<_filterChannels->at(inpIdx)<<endl;
+//kankan(*_weightIncTmp1,"tgt1");
+    _weightIncTmp1->reshape(_modulesX * _modulesX, _channels->at(inpIdx) * _filterPixels->at(inpIdx) * _numFilters);
+//kankan(*_weightIncTmp1,"tgt2");
+	
+/*if (inpIdx==0)
+{*/
+    NVMatrix* _weightIncTmp2 = new NVMatrix();
+    _weightIncTmp2->resize( _modulesX/tileWidth * _modulesX/tileHeight, _channels->at(inpIdx) * _filterPixels->at(inpIdx) * _numFilters);
+    _weightIncTmp2->apply(NVMatrixOps::Zero());
+/*}*/
+
+    NVMatrix* aline = new NVMatrix();
+    NVMatrix* alineSum = new NVMatrix();
+    NVMatrix* aline2 = new NVMatrix();
+    for (int i=0;i<(_modulesX);++i)
+    {
+	for(int j=0;j<(_modulesX/tileWidth);++j)
+	{
+		_weightIncTmp1->sliceRows( i*_modulesX+j*tileWidth , i*_modulesX+(j+1)*tileWidth ,*aline);
+			
+		//kankan(*aline,"aline");
+		alineSum->addSum(*aline,0,0,1);
+		//kankan(*alineSum,"alineSum");
+
+		_weightIncTmp2->sliceRows( (i/tileWidth*_modulesX/tileWidth+j),(i/tileWidth*_modulesX/tileWidth+j+1),*aline2);
+		aline2->add(*alineSum);
+		//kankan(*aline2,"aline2");
+		aline2->copy(*_weightIncTmp2,0,1,0,aline2->getNumCols(),(i/tileWidth*_modulesX/tileWidth+j),0);
+		//kankan(*_weightIncTmp2,"tmp");
+		//cout<<i*_modulesX+j*tileWidth<<"  ";
+		//cout<<(i/tileWidth*_modulesX/tileWidth+j)<<"  ";
+	}
+	//cout<<endl;
+    }
+    //kankan(*_weightIncTmp2,"t1");
+    _weightIncTmp2->reshape(_modulesX/tileWidth * _modulesX/tileHeight * _channels->at(inpIdx) * _filterPixels->at(inpIdx), _numFilters);
+    //kankan(*_weightIncTmp2,"t2");
+    //kankan(_weights[inpIdx].getInc(),"inc1");
+    _weightIncTmp2->copy(getGradTarget(inpIdx));
+    //_weights[inpIdx].getInc().add(*_weightIncTmp2,scaleInc,1);
+    //kankan(_prev[inpIdx]->getActs(),"in");
+    //kankan(_weights[inpIdx].getInc(),"w");
+    delete aline;
+    delete alineSum;
+    delete aline2;
+    delete _weightIncTmp1;
+    delete _weightIncTmp2;
+}
+
+void st_LocalUnsharedLayer::bpropActs(NVMatrix& v, int replicaIdx, int inpIdx, float scaleTargets, PASS_TYPE passType) {
+    st_localImgActs(v, getWeightMatrix(passType, inpIdx), _prev[replicaIdx][inpIdx]->getActsGrad(),_imgSize->at(inpIdx), _imgSize->at(inpIdx), _modulesX,
+                 _padding->at(inpIdx), _stride->at(inpIdx), _channels->at(inpIdx), _groups->at(inpIdx), scaleTargets, 1, tileWidth, tileHeight);
+}
+
+void st_LocalUnsharedLayer::_constrainWeights() {
+    for (int i = 0; i < _weights->getSize(); i++) {
+        if (_weights->at(i).getWBall() > 0  && _weights->at(i).isOwner() && _weights->at(i).getLearningRateSchedule().getBaseValue() > 0) {
+		/// sun added: do not do this now            
+		//normalizeLocalWeights(*_weights->at(i), _modules, _weights->at(i).getWBall());
+        }
+    }
+}
+
+/*
+ * =======================
  * SoftmaxLayer
  * =======================
  */
@@ -2455,8 +2618,8 @@ void HardTripletLossLayer::fpropActs(int inpIdx, float scaleTargets, PASS_TYPE p
 		int sNum=0;
 		for (int i=0;i<row;i+=2)
 		{
-			std::vector<std::pair<float,int>> negative_tmp;
-			std::vector<std::pair<float,int>> negative_semi_tmp;
+			vector< pair<float,int> > negative_tmp;
+			vector< pair<float,int> > negative_semi_tmp;
 			int label1 = cpu_label_p[i];
 			if(label1>=startID)
 				sNum++;

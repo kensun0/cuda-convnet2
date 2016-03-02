@@ -1522,6 +1522,25 @@ class ContrastiveCostParser(CostParser):
         dic['mtype'] = mcp.safe_get(name, 'mtype')
         dic['coeff'] = mcp.safe_get_float(name, 'coeff')
         dic['margin'] = mcp.safe_get_float(name, 'margin')
+
+class st_LocalUnsharedLayerParser(LocalLayerParser):
+    def __init__(self):
+        LocalLayerParser.__init__(self)
+        
+    def parse(self, name, mcp, prev_layers, model):
+        dic = LocalLayerParser.parse(self, name, mcp, prev_layers, model)
+	dic['tileWidth'] = mcp.safe_get_int(name, 'tileWidth')
+	dic['tileHeight'] = mcp.safe_get_int(name, 'tileHeight')
+	if (dic['modules']%(dic['tileWidth']*dic['tileHeight'])) != 0 :
+	    raise LayerParsingError("Layer '%s': modules(%d) mod tileWidth(%d)*tileHeight(%d) !=0" % (name,dic['modules'],dic['tileWidth'],dic['tileHeight']))
+        eltmult = lambda list1, list2: [l1 * l2 for l1,l2 in zip(list1, list2)]
+        scmult = lambda x, lst: [x * l for l in lst]
+        self.make_weights(dic['initW'], scmult(dic['modules']/dic['tileWidth']/dic['tileHeight'], eltmult(dic['filterPixels'], dic['filterChannels'])), [dic['filters']] * len(dic['inputs']), order='C')
+        self.make_biases(dic['modules']/dic['tileWidth']/dic['tileHeight'] * dic['filters'], 1, order='C')
+        
+        print "Initialized st (tile) locally-connected layer '%s' on GPUs %s, producing %dx%d %d-channel output" % (name, dic['gpus'], dic['modulesX'], dic['modulesX'], dic['filters'])
+        return dic
+  
 # All the layer parsers
 layer_parsers = {'data' :           lambda : DataLayerParser(),
                  'fc':              lambda : FCLayerParser(),
@@ -1551,6 +1570,7 @@ layer_parsers = {'data' :           lambda : DataLayerParser(),
                  'dropout':         lambda : DropoutLayerParser(),
                  'dropout2':        lambda : Dropout2LayerParser(),
                  'normalize':       lambda : NormalizeLayerParser(),
+		 'st_local':        lambda : st_LocalUnsharedLayerParser(),
                  'cost.logreg':     lambda : LogregCostParser(),
                  'cost.crossent':   lambda : CrossEntCostParser(),
                  'cost.bce':        lambda : BinomialCrossEntCostParser(),

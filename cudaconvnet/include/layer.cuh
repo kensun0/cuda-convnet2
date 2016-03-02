@@ -537,6 +537,19 @@ public:
     LocalUnsharedLayer(ConvNetThread* convNetThread, PyObject* paramsDict, int replicaID);
 }; 
 
+class st_LocalUnsharedLayer : public LocalLayer {
+protected:
+    void fpropActs(int inpIdx, float scaleTargets, PASS_TYPE passType, int passIdx);
+    void bpropActs(NVMatrix& v, int replicaIdx, int inpIdx, float scaleTargets, PASS_TYPE passType);
+    void bpropBiases(NVMatrix& v, PASS_TYPE passType);
+    void bpropWeights(NVMatrix& v, int replicaIdx, int inpIdx, PASS_TYPE passType);
+    void _constrainWeights();
+public:
+    st_LocalUnsharedLayer(ConvNetThread* convNetThread, PyObject* paramsDict, int replicaID);
+    int tileWidth;
+    int tileHeight;
+}; 
+
 class PoolLayer : public Layer, public TwoDLayerInterface {
 protected:
     int _sizeX, _start, _stride, _outputsX;

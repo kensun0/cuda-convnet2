@@ -198,7 +198,44 @@ __global__ void kNormalizeLCWeights(float* weights, const uint numFilters, const
         }
     }
 }
+/*
+template <int B_Y, int B_X, int filtersPerThread>
+__global__ void st_kNormalizeLCWeights(float* weights, const uint numFilters, const int numModules, const uint weightsPerFilter, const float norm, const int tileWidth, const int tileHeight) {
+    const uint moduleIdx = B_Y * blockIdx.y + threadIdx.y;
+    const uint filterIdx = B_X * blockIdx.x + threadIdx.x;
+    const int numModulesX = sqrtf(numModules);
+    float prod[filtersPerThread];
+    #pragma unroll
+    for (uint i = 0; i < filtersPerThread; ++i) {
+        prod[i] = 0;
+    }
+    if (moduleIdx < numModules) {
+	int st_idx1 = ((moduleIdx % numModulesX))/tileWidth;
+    	int st_idx2 = ((moduleIdx / numModulesX))/tileHeight;
+    //const int filtersOffset = blockFilterIdx + shFilterLoadY * numFilters + shFilterLoadX
+                            //+ (conv ? 0 : (st_idx1 + st_idx2*numModulesX/tileWidth) * numColors * filterPixels * numFilters);
+        weights += (st_idx1 + st_idx2*numModulesX/tileWidth) * weightsPerFilter * numFilters + filterIdx;
+        for (uint p = 0; p < weightsPerFilter; ++p) {
+            #pragma unroll
+            for (uint i = 0; i < filtersPerThread; ++i) {
+                prod[i] += square(weights[p * numFilters + i * B_X]);
+            }
+        }
 
+        #pragma unroll
+        for (uint i = 0; i < filtersPerThread; ++i) {
+            prod[i] = sqrtf(prod[i]);
+            prod[i] = prod[i] > norm ? __fdividef(norm, prod[i]) : 1.0f;
+        }
+
+        for (uint p = 0; p < weightsPerFilter; ++p) {
+            #pragma unroll
+            for (uint i = 0; i < filtersPerThread; ++i) {
+                weights[p * numFilters + i * B_X] *= prod[i];
+            }
+        }
+    }
+}*/
 /*
  * weights: (numModules, numColors, filterPixels, numFilters)
  */
@@ -234,7 +271,38 @@ void normalizeLocalWeights(NVMatrix& weights, int numModules, float norm) {
         }
     }
 }
+void st_normalizeLocalWeights(NVMatrix& weights, int numModules, float norm, int tileWidth, int tileHeight) {
+    int numFilters = weights.getNumCols();
+    int weightsPerFilter = weights.getNumRows() / (numModules/tileWidth/tileHeight);
+    assert((numModules/tileWidth/tileHeight) * weightsPerFilter == weights.getNumRows());
 
+    assert(!weights.isTrans());
+    assert(weights.isContiguous());
+    assert(numFilters % 16 == 0);
+
+    int bx = numFilters % 32 == 0 ? 32 : 16;
+    int by = bx == 32 ? 4 : 8;
+
+    int filtersPerThread = numFilters % 128 == 0 ? 4 : numFilters % 64 == 0 ? 2 : 1;
+    dim3 blocks(numFilters / (bx * filtersPerThread), DIVUP((numModules/tileWidth/tileHeight), by));
+    dim3 threads(bx, by);
+    cudaStream_t stream = NVMatrix::getDefaultStream();
+    if (filtersPerThread == 4) {
+        cudaFuncSetCacheConfig(kNormalizeLCWeights<4, 32, 4>, cudaFuncCachePreferL1);
+        kNormalizeLCWeights<4, 32, 4><<<blocks, threads, 0, stream>>>(weights.getDevData(), numFilters, (numModules/tileWidth/tileHeight), weightsPerFilter, norm);
+    } else if (filtersPerThread == 2) {
+        cudaFuncSetCacheConfig(kNormalizeLCWeights<4, 32, 2>, cudaFuncCachePreferL1);
+        kNormalizeLCWeights<4, 32, 2><<<blocks, threads, 0, stream>>>(weights.getDevData(), numFilters, (numModules/tileWidth/tileHeight), weightsPerFilter, norm);
+    } else {
+        if (numFilters % 32 == 0) {
+            cudaFuncSetCacheConfig(kNormalizeLCWeights<4, 32, 1>, cudaFuncCachePreferL1);
+            kNormalizeLCWeights<4, 32, 1><<<blocks, threads, 0, stream>>>(weights.getDevData(), numFilters, (numModules/tileWidth/tileHeight), weightsPerFilter, norm);
+        } else {
+            cudaFuncSetCacheConfig(kNormalizeLCWeights<8, 16, 1>, cudaFuncCachePreferL1);
+            kNormalizeLCWeights<8, 16, 1><<<blocks, threads, 0, stream>>>(weights.getDevData(), numFilters, (numModules/tileWidth/tileHeight), weightsPerFilter, norm);
+        }
+    }
+}
 /*
  * Block size 4x32
  * blockIdx.x determines img idx in batches of 32*imgsPerThread

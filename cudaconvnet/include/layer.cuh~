@@ -23,7 +23,7 @@
 #include <map>
 #include <assert.h>
 #include <helper_timer.h>
-#include <float>
+#include <float.h>
 #include "../../nvmatrix/include/nvmatrix.cuh"
 //#include "experimental/akrizhevsky/g3/mactruck-gpu-tests/gpu_util.cuh"
 
@@ -535,6 +535,17 @@ protected:
     void _constrainWeights();
 public:
     LocalUnsharedLayer(ConvNetThread* convNetThread, PyObject* paramsDict, int replicaID);
+}; 
+
+class st_LocalUnsharedLayer : public LocalLayer {
+protected:
+    void fpropActs(int inpIdx, float scaleTargets, PASS_TYPE passType, int passIdx);
+    void bpropActs(NVMatrix& v, int replicaIdx, int inpIdx, float scaleTargets, PASS_TYPE passType);
+    void bpropBiases(NVMatrix& v, PASS_TYPE passType);
+    void bpropWeights(NVMatrix& v, int replicaIdx, int inpIdx, PASS_TYPE passType);
+    void _constrainWeights();
+public:
+    st_LocalUnsharedLayer(ConvNetThread* convNetThread, PyObject* paramsDict, int replicaID);
 }; 
 
 class PoolLayer : public Layer, public TwoDLayerInterface {
